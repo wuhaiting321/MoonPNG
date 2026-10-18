@@ -1,0 +1,60 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "wuhaiting321/moonpng/src/io_abstraction"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+
+// Errors
+pub suberror IoError {
+  OutOfBounds(offset~ : Int, requested~ : Int, capacity~ : Int)
+} derive(Eq, @debug.Debug)
+
+// Types and methods
+pub(all) struct ByteReader {
+  data : Bytes
+  mut pos : Int
+}
+pub fn ByteReader::capacity(Self) -> Int
+pub fn ByteReader::data(Self) -> Bytes
+pub fn ByteReader::new(Bytes) -> Self
+pub fn ByteReader::position(Self) -> Int
+pub fn ByteReader::read_byte(Self) -> Byte raise IoError
+pub fn ByteReader::read_bytes(Self, Int) -> Bytes raise IoError
+pub fn ByteReader::read_u16be(Self) -> UInt raise IoError
+pub fn ByteReader::read_u32be(Self) -> UInt raise IoError
+pub fn ByteReader::remaining(Self) -> Int
+pub fn ByteReader::skip(Self, Int) -> Unit raise IoError
+pub impl Reader for ByteReader
+
+pub(all) struct ByteWriter {
+  mut buffer : Array[Byte]
+}
+pub fn ByteWriter::length(Self) -> Int
+pub fn ByteWriter::new() -> Self
+pub fn ByteWriter::to_bytes(Self) -> Bytes
+pub fn ByteWriter::write_byte(Self, Byte) -> Unit
+pub fn ByteWriter::write_bytes(Self, Bytes) -> Unit
+pub fn ByteWriter::write_u16be(Self, UInt) -> Unit
+pub fn ByteWriter::write_u32be(Self, UInt) -> Unit
+pub impl Writer for ByteWriter
+
+// Type aliases
+
+// Traits
+pub trait Reader {
+  fn read_byte(Self) -> Byte raise IoError
+  fn read_bytes(Self, Int) -> Bytes raise IoError
+  fn skip(Self, Int) -> Unit raise IoError
+  fn remaining(Self) -> Int
+  fn position(Self) -> Int
+}
+
+pub trait Writer {
+  fn write_byte(Self, Byte) -> Unit
+  fn write_bytes(Self, Bytes) -> Unit
+  fn length(Self) -> Int
+  fn to_bytes(Self) -> Bytes
+}

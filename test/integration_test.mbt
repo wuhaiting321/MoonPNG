@@ -6,6 +6,34 @@
 /// would, from outside the library packages.
 
 ///|
+test "byte reader and writer round trip" {
+  let writer = @io_abstraction.ByteWriter::new()
+  writer.write_u32be(0x12345678U)
+  writer.write_u16be(0xABCDU)
+  assert_eq(writer.length(), 6)
+
+  let bytes = writer.to_bytes()
+  assert_eq(bytes.length(), 6)
+
+  let reader = @io_abstraction.ByteReader::new(bytes)
+  assert_eq(reader.read_u32be(), 0x12345678U)
+  assert_eq(reader.read_u16be(), 0xABCDU)
+  assert_eq(reader.remaining(), 0)
+}
+
+///|
+test "reader reports bounds errors" {
+  let reader = @io_abstraction.ByteReader::new(b"\x01\x02")
+  let caught = try {
+    let _value = reader.read_u32be()
+    false
+  } catch {
+    @io_abstraction.IoError::OutOfBounds(_) => true
+  }
+  assert_true(caught)
+}
+
+///|
 test "image reports derived geometry" {
   let pixels : Bytes = Array::make(2 * 3 * 3, b'\x00') |> Bytes::from_array
   let image = @image.Image::new(2, 3, 8, @image.ColorType::Truecolor, pixels)

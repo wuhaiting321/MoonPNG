@@ -1,5 +1,6 @@
 import {
   "wuhaiting321/moonpng/src/image",
+  "wuhaiting321/moonpng/src/io_abstraction",
   "wuhaiting321/moonpng/src/png",
   "wuhaiting321/moonpng/src/png_decode",
   "wuhaiting321/moonpng/src/zlib",
