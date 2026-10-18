@@ -1,0 +1,19 @@
+# MoonBit build outputs
+_build/
+target/
+.mooncaches/
+.mooncakes/
+*.mbti.bak
+
+# Compiler artifacts
+*.wasm
+*.wat
+*.o
+*.obj
+
+# OS / Editor artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

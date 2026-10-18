@@ -1,0 +1,26 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "wuhaiting321/moonpng/src/png_decode"
+
+import {
+  "moonbitlang/core/debug",
+  "wuhaiting321/moonpng/src/image",
+}
+
+// Values
+pub fn decode(Bytes) -> @image.Image raise PngDecodeError
+
+pub fn is_png(Bytes) -> Bool
+
+pub fn signature() -> Bytes
+
+// Errors
+pub suberror PngDecodeError {
+  NotPng
+  BadChunk(reason~ : String)
+} derive(Eq, @debug.Debug)
+
+// Types and methods
+
+// Type aliases
+
+// Traits

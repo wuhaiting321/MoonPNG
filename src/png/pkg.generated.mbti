@@ -1,0 +1,23 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "wuhaiting321/moonpng/src/png"
+
+import {
+  "wuhaiting321/moonpng/src/image",
+  "wuhaiting321/moonpng/src/png_decode",
+  "wuhaiting321/moonpng/src/png_encode",
+}
+
+// Values
+pub fn decode(Bytes) -> @image.Image raise @png_decode.PngDecodeError
+
+pub fn encode(@image.Image) -> Bytes raise @png_encode.PngEncodeError
+
+pub fn version() -> String
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
