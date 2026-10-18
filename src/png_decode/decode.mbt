@@ -137,13 +137,94 @@ pub fn header(data : Bytes) -> PngHeader raise PngDecodeError {
 ///|
 /// Decode a PNG datastream into an `Image`.
 ///
-/// The chunk pipeline (PLTE/tRNS/IDAT/IEND, zlib inflate, filter
-/// reconstruction, and Adam7 de-interlacing) lands in the decoder milestones.
-/// This entry point currently validates the signature and the IHDR chunk, then
-/// reports the sample pipeline as pending.
+/// The chunks are read in order, the concatenated `IDAT` payload is inflated,
+/// and every scanline is reconstructed through its filter. Depth packing,
+/// palette handling, and Adam7 de-interlacing land in the next milestone, so
+/// this entry point currently accepts eight-bit progressive images.
 pub fn decode(data : Bytes) -> @image.Image raise PngDecodeError {
   let info = header(data)
-  raise BadChunk(
-    reason="the sample pipeline is not implemented yet for a \{info.width}x\{info.height} image",
+  if info.bit_depth != 8 {
+    raise BadChunk(reason="bit depth \{info.bit_depth} is not decoded yet")
+  }
+  if info.interlace != 0 {
+    raise BadChunk(reason="Adam7 interlacing is not decoded yet")
+  }
+  let reader = @io_abstraction.ByteReader::new(data)
+  skip(reader, 8)
+  let _ = Chunk::read(reader)
+  let mut palette : Bytes = b""
+  let mut transparency : Bytes = b""
+  let compressed : Array[Byte] = []
+  let mut ended = false
+  while !ended {
+    if reader.remaining() == 0 {
+      raise BadChunk(reason="the datastream ended before an IEND chunk")
+    }
+    let chunk = Chunk::read(reader)
+    if chunk.ctype == "IDAT" {
+      let mut i = 0
+      while i < chunk.data.length() {
+        compressed.push(chunk.data[i])
+        i = i + 1
+      }
+    } else if chunk.ctype == "PLTE" {
+      palette = chunk.data
+    } else if chunk.ctype == "tRNS" {
+      transparency = chunk.data
+    } else if chunk.ctype == "IEND" {
+      ended = true
+    }
+  }
+  if compressed.length() == 0 {
+    raise BadChunk(reason="the datastream carries no IDAT payload")
+  }
+  let samples = @zlib.inflate_zlib(Bytes::from_array(compressed)) catch {
+    @zlib.InflateError::BadData(reason~) => raise BadChunk(reason~)
+  }
+  let indexed = info.color_type == @image.ColorType::Indexed
+  if indexed && palette.length() == 0 {
+    raise BadChunk(reason="an indexed image must carry a PLTE chunk")
+  }
+  let bits_per_pixel = info.bit_depth * info.color_type.channels()
+  let row_bytes = (bits_per_pixel * info.width + 7) / 8
+  let needed = (row_bytes + 1) * info.height
+  if samples.length() < needed {
+    raise BadChunk(
+      reason="the inflated data is shorter than the image geometry requires",
+    )
+  }
+  let pixels : Array[Byte] = Array::make(row_bytes * info.height, b'\x00')
+  let bpp = bits_per_pixel / 8
+  let mut prior : Bytes = Bytes::make(row_bytes, b'\x00')
+  let mut offset = 0
+  let mut y = 0
+  while y < info.height {
+    let row : Array[Byte] = Array::make(row_bytes, b'\x00')
+    let mut i = 0
+    while i < row_bytes {
+      row[i] = samples[offset + 1 + i]
+      i = i + 1
+    }
+    unfilter_row(samples[offset].to_int(), row, prior, bpp)
+    i = 0
+    while i < row_bytes {
+      pixels[y * row_bytes + i] = row[i]
+      i = i + 1
+    }
+    prior = Bytes::from_array(row)
+    offset = offset + row_bytes + 1
+    y = y + 1
+  }
+  let image = @image.Image::new(
+    info.width,
+    info.height,
+    info.bit_depth,
+    info.color_type,
+    Bytes::from_array(pixels),
   )
+  let mut image = if indexed { image.with_palette(palette) } else { image }
+  if transparency.length() > 0 {
+    image = image.with_transparency(transparency)
+  }
+  image
 }
