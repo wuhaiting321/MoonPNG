@@ -4,10 +4,13 @@ package "wuhaiting321/moonpng/src/png_decode"
 import {
   "moonbitlang/core/debug",
   "wuhaiting321/moonpng/src/image",
+  "wuhaiting321/moonpng/src/io_abstraction",
 }
 
 // Values
 pub fn decode(Bytes) -> @image.Image raise PngDecodeError
+
+pub fn header(Bytes) -> PngHeader raise PngDecodeError
 
 pub fn is_png(Bytes) -> Bool
 
@@ -20,6 +23,19 @@ pub suberror PngDecodeError {
 } derive(Eq, @debug.Debug)
 
 // Types and methods
+pub(all) struct Chunk {
+  ctype : String
+  data : Bytes
+} derive(Eq, @debug.Debug)
+pub fn Chunk::read(@io_abstraction.ByteReader) -> Self raise PngDecodeError
+
+pub(all) struct PngHeader {
+  width : Int
+  height : Int
+  bit_depth : Int
+  color_type : @image.ColorType
+  interlace : Int
+} derive(Eq, @debug.Debug)
 
 // Type aliases
 
