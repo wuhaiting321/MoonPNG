@@ -172,6 +172,29 @@ test "round-trips the PngSuite baseline corpus through the encoder" {
 }
 
 ///|
+/// Total size a datastream would occupy if its IDAT carried the scanlines
+/// verbatim: signature, IHDR, IDAT framing plus stored-block headers, IEND.
+fn stored_datastream_size(scanlines : Int) -> Int {
+  let blocks = (scanlines + 65534) / 65535
+  63 + 5 * blocks + scanlines
+}
+
+///|
+test "compressing a real image beats storing its scanlines" {
+  let corpus : Array[Bytes] = [basn0g04, basn0g16, basn2c16, basn6a08]
+  let mut i = 0
+  while i < corpus.length() {
+    let image = @png.decode(corpus[i])
+    let scanlines = image.row_bytes() * image.height + image.height
+    let encoded = @png.encode(image).length()
+    let stored = stored_datastream_size(scanlines)
+    println("corpus stored=\{stored} compressed=\{encoded}")
+    assert_true(encoded * 5 <= stored * 4)
+    i = i + 1
+  }
+}
+
+///|
 test "the encoder rejects images it cannot describe" {
   let empty = @image.Image::new(0, 0, 8, @image.ColorType::Truecolor, b"")
   let caught_empty = try {
