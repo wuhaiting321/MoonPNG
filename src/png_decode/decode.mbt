@@ -138,17 +138,12 @@ pub fn header(data : Bytes) -> PngHeader raise PngDecodeError {
 /// Decode a PNG datastream into an `Image`.
 ///
 /// The chunks are read in order, the concatenated `IDAT` payload is inflated,
-/// and every scanline is reconstructed through its filter. Depth packing,
-/// palette handling, and Adam7 de-interlacing land in the next milestone, so
-/// this entry point currently accepts eight-bit progressive images.
+/// and every scanline is reconstructed through its filter. Interlaced
+/// datastreams are reassembled from their seven Adam7 passes. The decoded
+/// samples keep the packed layout of the datastream, so the palette and the raw
+/// `tRNS` payload travel alongside them instead of being expanded to RGBA.
 pub fn decode(data : Bytes) -> @image.Image raise PngDecodeError {
   let info = header(data)
-  if info.bit_depth != 8 {
-    raise BadChunk(reason="bit depth \{info.bit_depth} is not decoded yet")
-  }
-  if info.interlace != 0 {
-    raise BadChunk(reason="Adam7 interlacing is not decoded yet")
-  }
   let reader = @io_abstraction.ByteReader::new(data)
   skip(reader, 8)
   let _ = Chunk::read(reader)
@@ -185,35 +180,79 @@ pub fn decode(data : Bytes) -> @image.Image raise PngDecodeError {
   if indexed && palette.length() == 0 {
     raise BadChunk(reason="an indexed image must carry a PLTE chunk")
   }
-  let bits_per_pixel = info.bit_depth * info.color_type.channels()
-  let row_bytes = (bits_per_pixel * info.width + 7) / 8
-  let needed = (row_bytes + 1) * info.height
-  if samples.length() < needed {
+  let channels = info.color_type.channels()
+  let bits_per_pixel = info.bit_depth * channels
+  let row_bytes = scanline_bytes(info.width, bits_per_pixel)
+  let required = required_sample_bytes(
+    info.width,
+    info.height,
+    info.interlace,
+    bits_per_pixel,
+  )
+  if samples.length() < required {
     raise BadChunk(
       reason="the inflated data is shorter than the image geometry requires",
     )
   }
   let pixels : Array[Byte] = Array::make(row_bytes * info.height, b'\x00')
-  let bpp = bits_per_pixel / 8
-  let mut prior : Bytes = Bytes::make(row_bytes, b'\x00')
-  let mut offset = 0
-  let mut y = 0
-  while y < info.height {
-    let row : Array[Byte] = Array::make(row_bytes, b'\x00')
-    let mut i = 0
-    while i < row_bytes {
-      row[i] = samples[offset + 1 + i]
-      i = i + 1
+  let bpp = if bits_per_pixel < 8 { 1 } else { bits_per_pixel / 8 }
+  if info.interlace == 0 {
+    let mut prior : Bytes = Bytes::make(row_bytes, b'\x00')
+    let mut offset = 0
+    let mut y = 0
+    while y < info.height {
+      let row : Array[Byte] = Array::make(row_bytes, b'\x00')
+      let mut i = 0
+      while i < row_bytes {
+        row[i] = samples[offset + 1 + i]
+        i = i + 1
+      }
+      unfilter_row(samples[offset].to_int(), row, prior, bpp)
+      i = 0
+      while i < row_bytes {
+        pixels[y * row_bytes + i] = row[i]
+        i = i + 1
+      }
+      prior = Bytes::from_array(row)
+      offset = offset + row_bytes + 1
+      y = y + 1
     }
-    unfilter_row(samples[offset].to_int(), row, prior, bpp)
-    i = 0
-    while i < row_bytes {
-      pixels[y * row_bytes + i] = row[i]
-      i = i + 1
+  } else {
+    let mut offset = 0
+    let mut pass = 0
+    while pass < 7 {
+      let (x_start, y_start, x_step, y_step) = pass_geometry(pass)
+      let pass_width = pass_width_of(pass, info.width)
+      let pass_height = pass_height_of(pass, info.height)
+      if pass_width > 0 && pass_height > 0 {
+        let pass_row_bytes = scanline_bytes(pass_width, bits_per_pixel)
+        let mut prior : Bytes = Bytes::make(pass_row_bytes, b'\x00')
+        let mut line = 0
+        while line < pass_height {
+          let row : Array[Byte] = Array::make(pass_row_bytes, b'\x00')
+          let mut i = 0
+          while i < pass_row_bytes {
+            row[i] = samples[offset + 1 + i]
+            i = i + 1
+          }
+          unfilter_row(samples[offset].to_int(), row, prior, bpp)
+          place_pass_row(
+            pixels,
+            (y_start + line * y_step) * row_bytes,
+            row,
+            pass_width,
+            x_start,
+            x_step,
+            channels,
+            info.bit_depth,
+          )
+          prior = Bytes::from_array(row)
+          offset = offset + pass_row_bytes + 1
+          line = line + 1
+        }
+      }
+      pass = pass + 1
     }
-    prior = Bytes::from_array(row)
-    offset = offset + row_bytes + 1
-    y = y + 1
   }
   let image = @image.Image::new(
     info.width,
