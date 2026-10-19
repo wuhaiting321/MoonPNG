@@ -7,6 +7,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Pin the toolchain so formatting, generated interfaces, and diagnostics stay
+  # reproducible across the three runners instead of drifting with the newest
+  # release.
+  MOONBIT_INSTALL_VERSION: "0.1.20260915"
+
 jobs:
   verify:
     name: Verify (${{ matrix.os }})
@@ -57,9 +63,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
 
       - name: Verify toolchain
-        run: |
-          moon version --all
-          moon update
+        run: moon version --all
 
       - name: Check formatting
         run: moon fmt --check
