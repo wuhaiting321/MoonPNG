@@ -21,8 +21,8 @@
 | 项目方向 | 图像编解码基础库 / PNG 与 JPEG |
 | 是否为移植项目 | 否，原创项目 |
 | 模块名 | `wuhaiting321/moonpng`（遵循 mooncakes.io 的 `<author>/<module>` 命名规范） |
-| 代码规模 | 2854 行 MoonBit 源码 + 1124 行测试代码，23 个 `.mbt` 文件，合计 3978 行 |
-| 测试状态 | `moon test` 全部通过（45 个用例，0 失败）；行覆盖率 921 / 1011 |
+| 代码规模 | 2854 行库源码 + 1124 行测试 + 71 行可运行示例，24 个 `.mbt` 文件，合计 4049 行 |
+| 测试状态 | `moon test` 全部通过（45 个用例，0 失败）；行覆盖率 921 / 1040 |
 | 构建状态 | 默认目标与 `moon check --target all --deny-warn` 均零错误、零告警 |
 | 开源许可证 | Apache-2.0 |
 
@@ -46,7 +46,53 @@ MoonPNG 用于补齐这块空白：从字节流到像素阵列的全部工作—
 - 与"只解不编"的示例代码相比：解码与编码互为逆运算，测试用同一套语料双向验证，
   编码器还须接受 Pillow 的外部复核，避免"自己验证自己"。
 
-## 三、核心功能范围
+## 三、典型使用场景
+
+三个场景都由 [examples/main.mbt](./examples/main.mbt) 用同一份代码真实跑通，
+输入是仓库内嵌的字节流，不读取文件、不请求宿主能力。
+
+### 3.1 在 WASI 沙箱里读取 PNG 截图或图标
+
+- **输入**：PNG 字节流（示例内嵌 4×4、8 bit 真彩 PNG）
+- **调用**：`@png.decode(bytes) -> @image.Image`
+- **输出**：`4x4, 8-bit, 3 channel(s)`；首个像素 `(10, 20, 200)`
+- **要点**：签名、CRC-32、inflate 与反滤波全部在 MoonBit 内完成，
+  不链接 libpng，也不触碰宿主文件系统。
+
+### 3.2 把内存中的图像写回 PNG
+
+- **输入**：上一步得到的 `Image`
+- **调用**：`@png.encode(image) -> Bytes`
+- **输出**：79 字节 PNG（原始文件 157 字节）；再次解码后样本逐字节一致
+- **要点**：编码器自行选择滤波并做 LZ77 + 固定 Huffman 压缩，
+  产物可被 Pillow 等外部解码器读取。
+
+### 3.3 读取用户上传的 JPEG 照片
+
+- **输入**：Baseline JPEG 字节流（示例内嵌 8×8 灰度）
+- **调用**：`@png_jpeg.decode(bytes) -> @image.Image`
+- **输出**：`8x8, 1 channel(s)`；灰度样本均值 127
+- **要点**：Huffman 熵解码、反量化、IDCT 与色彩还原同样零 FFI；
+  解出的 `Image` 与 PNG 解码结果同构，后续处理只需一套代码。
+
+在仓库根目录运行（`--target wasm` 使用 MoonBit 自带的 WASI 运行时）：
+
+```bash
+moon run examples --target wasm
+```
+
+实际输出：
+
+```text
+PNG header: 4x4, 8-bit, 3 channel(s)
+first pixel: (10, 20, 200)
+encoded PNG: 79 bytes
+round trip: samples identical
+decoded JPEG: 8x8, 1 channel(s)
+gray samples: first=255, last=255, mean=127
+```
+
+## 四、核心功能范围
 
 - **PNG 解码**：Signature 校验、`IHDR` / `PLTE` / `tRNS` / `IDAT` / `IEND` 解析、
   每 chunk 的 CRC-32 校验、未知 ancillary chunk 按规范跳过。
@@ -70,9 +116,9 @@ MoonPNG 用于补齐这块空白：从字节流到像素阵列的全部工作—
 - **三端统一 API**：`@png.decode(Bytes) -> Image`、`@png.encode(Image) -> Bytes`、
   `@png_jpeg.decode(Bytes) -> Image`，Native / Wasm / WasmGC / JS 共享同一实现。
 
-## 四、安装方式与快速开始
+## 五、安装方式与快速开始
 
-### 4.1 前置要求
+### 5.1 前置要求
 
 | 依赖 | 版本要求 | 说明 |
 | --- | --- | --- |
@@ -89,27 +135,36 @@ moon version --all          # 应显示 moonc v0.10.13 或更高
 
 Windows 安装包见 <https://www.moonbitlang.com/download/>。
 
-### 4.2 获取项目
+### 5.2 获取项目
 
 ```bash
 git clone https://github.com/wuhaiting321/MoonPNG.git
 cd MoonPNG
 ```
 
-### 4.3 构建与验证
+### 5.3 运行示例
+
+```bash
+moon run examples --target wasm   # 无需 gcc 或 Node.js，使用自带的 WASI 运行时
+```
+
+输出与第三节列出的六个场景结果一致；示例只读取内嵌字节，可离线重复运行。
+
+### 5.4 构建与验证
 
 ```bash
 moon check --deny-warn               # 默认目标，零告警
 moon check --target all --deny-warn  # Native / Wasm / WasmGC / JS
 moon test                            # 45 个用例
 moon test --enable-coverage
-moon coverage report -f summary      # 921 / 1011
+moon coverage report -f summary      # 921 / 1040
 ```
 
-仓库是**库**，没有命令行入口；验证方式是类型检查与测试套件本身，
-测试语料（PngSuite 片段、Pillow 生成的 JPEG）已内嵌在 `test/` 中，离线可跑。
+仓库是**库**，`examples/` 只是演示三个入口的主包，不提供通用命令行工具；
+验证方式是类型检查、测试套件与示例本身，测试语料（PngSuite 片段、
+Pillow 生成的 JPEG）已内嵌在 `test/` 与 `examples/` 中，离线可跑。
 
-### 4.4 作为依赖安装
+### 5.5 作为依赖安装
 
 模块名遵循 mooncakes.io 的 `<author>/<module>` 规范：
 
@@ -137,9 +192,9 @@ fn load_photo(bytes : Bytes) -> @image.Image raise {
 }
 ```
 
-## 五、技术亮点与实现说明
+## 六、技术亮点与实现说明
 
-### 5.1 包结构与职责
+### 6.1 包结构与职责
 
 | 包 | 职责 | 源码规模 |
 | --- | --- | --- |
@@ -153,9 +208,10 @@ fn load_photo(bytes : Bytes) -> @image.Image raise {
 
 依赖方向单向：`png → png_decode / png_encode → { image, io_abstraction, zlib }`，
 `png_jpeg → image`，底层三包互不依赖，不存在环。上表合计 2854 行，另有 1124 行
-测试代码，总计 3978 行，低于 5000 行的项目硬约束。
+测试代码与 71 行可运行示例（`examples/`，独立主包），总计 4049 行，
+低于 5000 行的项目硬约束。
 
-### 5.2 核心技术实现
+### 6.2 核心技术实现
 
 1. **IO 抽象与图像模型。** `Reader` / `Writer` 两个 trait 把"读几个字节、
    按大端取 16/32 位、越界报错"集中到一处；内存后端 `ByteReader` / `ByteWriter`
@@ -198,7 +254,7 @@ fn load_photo(bytes : Bytes) -> @image.Image raise {
    整数系数与常量表，四舍五入在转字节前一次性完成。因此同一份源码在
    Native、Wasm、WasmGC、JS 上的输出一致，也不需要宿主提供 zlib/libjpeg。
 
-### 5.3 数据流
+### 6.3 数据流
 
 ```
 PNG 解码
@@ -220,7 +276,7 @@ Bytes ─► SOI ─► DQT / SOF0 / DHT / DRI ─► SOS ─► MCU 扫描（Hu
       ─► 反量化 ─► 可分离 IDCT ─► 色度上采样 ─► YCbCr→RGB ─► Image
 ```
 
-### 5.4 验证与质量保障
+### 6.4 验证与质量保障
 
 - **CI 门禁**：GitHub Actions 在 Linux / macOS / Windows 上并行执行
   `moon check`、`moon check --target all`、`moon test`，并在 native 目标上
@@ -229,7 +285,9 @@ Bytes ─► SOI ─► DQT / SOF0 / DHT / DRI ─► SOS ─► MCU 扫描（Hu
   CRC-32 / Adler-32 标准向量、PngSuite 语料解码、Adam7 反交错、编码器往返与
   全部拒绝路径、JPEG marker / Huffman / IDCT / 重启 / 错误路径。
 - **覆盖率**：`moon test --enable-coverage` + `moon coverage report -f summary`
-  为 921 / 1011。
+  为 921 / 1040。
+- **示例实跑**：`moon run examples --target wasm` 在 WASI 运行时上真实执行，
+  一次跑通解码、编码往返与 JPEG 解码，输出见第三节。
 - **外部参照**：PngSuite `basn*` 语料的样本流 CRC-32 取自独立的 CPython
   预言机，而不是本项目自身的实现，避免"自己验证自己"。
 - **PNG 互操作**：本编码器产出的数据流经 Python Pillow 11.1.0 解码，
@@ -246,7 +304,7 @@ Bytes ─► SOI ─► DQT / SOF0 / DHT / DRI ─► SOS ─► MCU 扫描（Hu
   | rgb420rst | 4:2:0 + 每个 MCU 重启 | 13，且像素与不重启版本完全一致 |
   | rgb420odd | 4:2:0，13×9 非整 MCU | 13 |
 
-### 5.5 移植或参考说明
+### 6.5 移植或参考说明
 
 | 项目 | 内容 |
 | --- | --- |
@@ -281,13 +339,14 @@ Bytes ─► SOI ─► DQT / SOF0 / DHT / DRI ─► SOS ─► MCU 扫描（Hu
 开发过程中使用 AI 编程助手辅助代码生成、测试补全与文档撰写；项目的技术路径、
 质量边界、验证方式与开源合规由作者负责，所有代码均经过本地编译与单元测试验证。
 
-## 六、后续计划
+## 七、后续计划
 
 - [x] 工程骨架、IO 抽象层与图像模型
 - [x] PNG 解码器（全位深 / 全色型 / 全滤波 / Adam7 / 完整 DEFLATE）
 - [x] PNG 编码器（chunk 组帧、滤波择优、LZ77 + Huffman、zlib 包裹）
 - [x] 面向 PngSuite 语料与 Pillow 的交叉验证
 - [x] Baseline JPEG 解码器（marker / Huffman / IDCT / 重启 / 色彩还原）
+- [x] 可运行示例与三个典型使用场景
 - [ ] 在剩余行数预算内补充更精细的色度插值
 
 ---
