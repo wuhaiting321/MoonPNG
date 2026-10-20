@@ -4,5 +4,6 @@ import {
   "wuhaiting321/moonpng/src/png",
   "wuhaiting321/moonpng/src/png_decode",
   "wuhaiting321/moonpng/src/png_encode",
+  "wuhaiting321/moonpng/src/png_jpeg",
   "wuhaiting321/moonpng/src/zlib",
 } for "test"

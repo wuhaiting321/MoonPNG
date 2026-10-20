@@ -1,10 +1,21 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "wuhaiting321/moonpng/src/png_jpeg"
 
+import {
+  "moonbitlang/core/debug",
+  "wuhaiting321/moonpng/src/image",
+}
+
 // Values
-pub fn enabled() -> Bool
+pub fn decode(Bytes) -> @image.Image raise JpegDecodeError
+
+pub fn is_jpeg(Bytes) -> Bool
 
 // Errors
+pub suberror JpegDecodeError {
+  NotJpeg
+  BadData(reason~ : String)
+} derive(Eq, @debug.Debug)
 
 // Types and methods
 

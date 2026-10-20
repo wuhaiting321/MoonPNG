@@ -12,6 +12,7 @@ pub fn encode(@image.Image) -> Bytes raise PngEncodeError
 // Errors
 pub suberror PngEncodeError {
   EmptyImage
+  BadImage(reason~ : String)
   Unsupported(reason~ : String)
 } derive(Eq, @debug.Debug)
 
