@@ -1,0 +1,9 @@
+import {
+  "wuhaiting321/moonpng/src/image",
+  "wuhaiting321/moonpng/src/png",
+  "wuhaiting321/moonpng/src/png_jpeg",
+}
+
+options(
+  is_main: true,
+)
