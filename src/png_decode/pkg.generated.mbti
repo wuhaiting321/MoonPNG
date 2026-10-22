@@ -30,11 +30,11 @@ pub(all) struct Chunk {
 pub fn Chunk::read(@io_abstraction.ByteReader) -> Self raise PngDecodeError
 
 pub(all) struct PngHeader {
-  width : Int
-  height : Int
-  bit_depth : Int
+  width : Int32
+  height : Int32
+  bit_depth : Int32
   color_type : @image.ColorType
-  interlace : Int
+  interlace : Int32
 } derive(Eq, @debug.Debug)
 
 // Type aliases

@@ -9,36 +9,36 @@ import {
 
 // Errors
 pub suberror IoError {
-  OutOfBounds(offset~ : Int, requested~ : Int, capacity~ : Int)
+  OutOfBounds(offset~ : Int32, requested~ : Int32, capacity~ : Int32)
 } derive(Eq, @debug.Debug)
 
 // Types and methods
 pub(all) struct ByteReader {
   data : Bytes
-  mut pos : Int
+  mut pos : Int32
 }
-pub fn ByteReader::capacity(Self) -> Int
+pub fn ByteReader::capacity(Self) -> Int32
 pub fn ByteReader::data(Self) -> Bytes
 pub fn ByteReader::new(Bytes) -> Self
-pub fn ByteReader::position(Self) -> Int
+pub fn ByteReader::position(Self) -> Int32
 pub fn ByteReader::read_byte(Self) -> Byte raise IoError
-pub fn ByteReader::read_bytes(Self, Int) -> Bytes raise IoError
-pub fn ByteReader::read_u16be(Self) -> UInt raise IoError
-pub fn ByteReader::read_u32be(Self) -> UInt raise IoError
-pub fn ByteReader::remaining(Self) -> Int
-pub fn ByteReader::skip(Self, Int) -> Unit raise IoError
+pub fn ByteReader::read_bytes(Self, Int32) -> Bytes raise IoError
+pub fn ByteReader::read_u16be(Self) -> UInt32 raise IoError
+pub fn ByteReader::read_u32be(Self) -> UInt32 raise IoError
+pub fn ByteReader::remaining(Self) -> Int32
+pub fn ByteReader::skip(Self, Int32) -> Unit raise IoError
 pub impl Reader for ByteReader
 
 pub(all) struct ByteWriter {
   mut buffer : Array[Byte]
 }
-pub fn ByteWriter::length(Self) -> Int
+pub fn ByteWriter::length(Self) -> Int32
 pub fn ByteWriter::new() -> Self
 pub fn ByteWriter::to_bytes(Self) -> Bytes
 pub fn ByteWriter::write_byte(Self, Byte) -> Unit
 pub fn ByteWriter::write_bytes(Self, Bytes) -> Unit
-pub fn ByteWriter::write_u16be(Self, UInt) -> Unit
-pub fn ByteWriter::write_u32be(Self, UInt) -> Unit
+pub fn ByteWriter::write_u16be(Self, UInt32) -> Unit
+pub fn ByteWriter::write_u32be(Self, UInt32) -> Unit
 pub impl Writer for ByteWriter
 
 // Type aliases
@@ -46,15 +46,15 @@ pub impl Writer for ByteWriter
 // Traits
 pub trait Reader {
   fn read_byte(Self) -> Byte raise IoError
-  fn read_bytes(Self, Int) -> Bytes raise IoError
-  fn skip(Self, Int) -> Unit raise IoError
-  fn remaining(Self) -> Int
-  fn position(Self) -> Int
+  fn read_bytes(Self, Int32) -> Bytes raise IoError
+  fn skip(Self, Int32) -> Unit raise IoError
+  fn remaining(Self) -> Int32
+  fn position(Self) -> Int32
 }
 
 pub trait Writer {
   fn write_byte(Self, Byte) -> Unit
   fn write_bytes(Self, Bytes) -> Unit
-  fn length(Self) -> Int
+  fn length(Self) -> Int32
   fn to_bytes(Self) -> Bytes
 }

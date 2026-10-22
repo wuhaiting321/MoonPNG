@@ -17,28 +17,28 @@ pub(all) enum ColorType {
   GrayscaleAlpha
   TruecolorAlpha
 } derive(Eq, @debug.Debug)
-pub fn ColorType::channels(Self) -> Int
-pub fn ColorType::code(Self) -> Int
-pub fn ColorType::from_code(Int) -> Self?
+pub fn ColorType::channels(Self) -> Int32
+pub fn ColorType::code(Self) -> Int32
+pub fn ColorType::from_code(Int32) -> Self?
 pub fn ColorType::is_alpha(Self) -> Bool
 
 pub(all) struct Image {
-  width : Int
-  height : Int
-  bit_depth : Int
+  width : Int32
+  height : Int32
+  bit_depth : Int32
   color_type : ColorType
   pixels : Bytes
   palette : Bytes
   transparency : Bytes
 }
-pub fn Image::bits_per_pixel(Self) -> Int
-pub fn Image::channels(Self) -> Int
+pub fn Image::bits_per_pixel(Self) -> Int32
+pub fn Image::channels(Self) -> Int32
 pub fn Image::has_transparency(Self) -> Bool
 pub fn Image::is_indexed(Self) -> Bool
-pub fn Image::new(Int, Int, Int, ColorType, Bytes) -> Self
-pub fn Image::pixel_bytes(Self) -> Int
-pub fn Image::row_bytes(Self) -> Int
-pub fn Image::sample_count(Self) -> Int
+pub fn Image::new(Int32, Int32, Int32, ColorType, Bytes) -> Self
+pub fn Image::pixel_bytes(Self) -> Int32
+pub fn Image::row_bytes(Self) -> Int32
+pub fn Image::sample_count(Self) -> Int32
 pub fn Image::with_palette(Self, Bytes) -> Self
 pub fn Image::with_transparency(Self, Bytes) -> Self
 

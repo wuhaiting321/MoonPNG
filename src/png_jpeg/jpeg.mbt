@@ -34,6 +34,7 @@ priv struct Component {
   mut plane : Array[Byte]
   mut stride : Int
   mut rows : Int
+  mut scanned : Bool
 }
 
 ///|
@@ -55,6 +56,7 @@ priv struct JpegState {
   dc_defined : Array[Bool]
   ac_defined : Array[Bool]
   mut restart_interval : Int
+  mut adobe_transform : Int
 }
 
 ///|
@@ -75,6 +77,7 @@ fn JpegState::new(data : Bytes) -> JpegState {
     dc_defined: Array::make(4, false),
     ac_defined: Array::make(4, false),
     restart_interval: 0,
+    adobe_transform: -1,
   }
 }
 
@@ -237,8 +240,10 @@ fn parse_sof(state : JpegState, payload : Bytes) -> Unit raise JpegDecodeError {
   if width == 0 || height == 0 {
     raise BadData(reason="the frame declares an empty image")
   }
-  if count != 1 && count != 3 {
-    raise BadData(reason="only one and three component frames are supported")
+  if count < 1 || count > 4 {
+    raise BadData(
+      reason="the frame declares \{count} components; baseline frames carry one to four",
+    )
   }
   if payload.length() < 6 + count * 3 {
     raise BadData(reason="the SOF0 segment ends inside its component list")
@@ -265,6 +270,17 @@ fn parse_sof(state : JpegState, payload : Bytes) -> Unit raise JpegDecodeError {
     if v > max_v {
       max_v = v
     }
+    let mut duplicate = false
+    let mut j = 0
+    while j < components.length() {
+      if components[j].id == id {
+        duplicate = true
+      }
+      j = j + 1
+    }
+    if duplicate {
+      raise BadData(reason="two frame components share the identifier \{id}")
+    }
     components.push({
       id,
       h,
@@ -276,6 +292,7 @@ fn parse_sof(state : JpegState, payload : Bytes) -> Unit raise JpegDecodeError {
       plane: [],
       stride: 0,
       rows: 0,
+      scanned: false,
     })
     i = i + 1
   }
@@ -285,6 +302,26 @@ fn parse_sof(state : JpegState, payload : Bytes) -> Unit raise JpegDecodeError {
   state.max_v = max_v
   state.components = components
   state.frame_seen = true
+  prepare_planes(state)
+}
+
+///|
+/// Allocate one sample plane per component, padded to whole MCUs.
+///
+/// The plane is kept across scans: a sequential frame may divide its blocks
+/// into any number of scans, and every scan writes a disjoint part of it.
+fn prepare_planes(state : JpegState) -> Unit {
+  let mcus_x = (state.width + 8 * state.max_h - 1) / (8 * state.max_h)
+  let mcus_y = (state.height + 8 * state.max_v - 1) / (8 * state.max_v)
+  let mut i = 0
+  while i < state.components.length() {
+    let comp = state.components[i]
+    comp.stride = mcus_x * comp.h * 8
+    comp.rows = mcus_y * comp.v * 8
+    comp.plane = Array::make(comp.stride * comp.rows, b'\x00')
+    comp.dc = 0
+    i = i + 1
+  }
 }
 
 ///|
@@ -363,8 +400,15 @@ fn decode_block(
 }
 
 ///|
-/// Decode the single sequential scan of a baseline frame, walking MCU by MCU in
-/// raster order and restarting the DC predictors at every restart interval.
+/// Decode one sequential scan into the component planes.
+///
+/// A scan may cover the whole frame, a subset of its components, or a single
+/// component. With two or more components the scan is interleaved and each MCU
+/// carries `h * v` blocks per component; with one component every MCU is a
+/// single block laid out on that component's own block grid (ITU T.81,
+/// sections A.2.3 and F.1.1.3). A sequential frame may split its blocks into
+/// any number of scans, so the planes are written piecewise and kept until the
+/// whole frame has been decoded.
 fn decode_scan(
   state : JpegState,
   payload : Bytes,
@@ -376,8 +420,8 @@ fn decode_scan(
     raise BadData(reason="the SOS segment is truncated")
   }
   let count = payload[0].to_int()
-  if count != state.components.length() {
-    raise BadData(reason="the scan does not cover every component of the frame")
+  if count < 1 || count > state.components.length() {
+    raise BadData(reason="the scan names an illegal number of components")
   }
   if payload.length() < 1 + count * 2 + 3 {
     raise BadData(reason="the SOS segment is truncated")
@@ -390,6 +434,17 @@ fn decode_scan(
     let index = component_index(state, id)
     if index < 0 {
       raise BadData(reason="the scan names the unknown component \{id}")
+    }
+    let mut repeated = false
+    let mut j = 0
+    while j < order.length() {
+      if order[j] == index {
+        repeated = true
+      }
+      j = j + 1
+    }
+    if repeated {
+      raise BadData(reason="the scan names component \{id} more than once")
     }
     let td = tables >> 4
     let ta = tables & 15
@@ -406,54 +461,81 @@ fn decode_scan(
   if spectral_start != 0 || spectral_end != 63 {
     raise BadData(reason="only sequential scans are supported")
   }
-  let mcus_x = (state.width + 8 * state.max_h - 1) / (8 * state.max_h)
-  let mcus_y = (state.height + 8 * state.max_v - 1) / (8 * state.max_v)
-  let mut c = 0
-  while c < state.components.length() {
-    let comp = state.components[c]
-    comp.stride = mcus_x * comp.h * 8
-    comp.rows = mcus_y * comp.v * 8
-    comp.plane = Array::make(comp.stride * comp.rows, b'\x00')
-    comp.dc = 0
-    c = c + 1
-  }
   let reader = BitReader::new(state.data, state.pos)
-  let total = mcus_x * mcus_y
-  let mut mcu = 0
-  while mcu < total {
-    if state.restart_interval > 0 &&
-      mcu > 0 &&
-      mcu % state.restart_interval == 0 {
-      reader.restart()
-      let mut r = 0
-      while r < state.components.length() {
-        state.components[r].dc = 0
-        r = r + 1
+  let mut s = 0
+  while s < order.length() {
+    state.components[order[s]].dc = 0
+    s = s + 1
+  }
+  if order.length() == 1 {
+    let comp = state.components[order[0]]
+    let comp_width = (state.width * comp.h + state.max_h - 1) / state.max_h
+    let comp_height = (state.height * comp.v + state.max_v - 1) / state.max_v
+    let blocks_x = (comp_width + 7) / 8
+    let blocks_y = (comp_height + 7) / 8
+    let total = blocks_x * blocks_y
+    let mut mcu = 0
+    while mcu < total {
+      if state.restart_interval > 0 &&
+        mcu > 0 &&
+        mcu % state.restart_interval == 0 {
+        reader.restart()
+        comp.dc = 0
       }
+      decode_block(
+        state,
+        reader,
+        comp,
+        (mcu % blocks_x) * 8,
+        (mcu / blocks_x) * 8,
+      )
+      mcu = mcu + 1
     }
-    let mcu_x = mcu % mcus_x
-    let mcu_y = mcu / mcus_x
-    let mut s = 0
-    while s < order.length() {
-      let comp = state.components[order[s]]
-      let mut block_y = 0
-      while block_y < comp.v {
-        let mut block_x = 0
-        while block_x < comp.h {
-          decode_block(
-            state,
-            reader,
-            comp,
-            (mcu_x * comp.h + block_x) * 8,
-            (mcu_y * comp.v + block_y) * 8,
-          )
-          block_x = block_x + 1
+  } else {
+    let mcus_x = (state.width + 8 * state.max_h - 1) / (8 * state.max_h)
+    let mcus_y = (state.height + 8 * state.max_v - 1) / (8 * state.max_v)
+    let total = mcus_x * mcus_y
+    let mut mcu = 0
+    while mcu < total {
+      if state.restart_interval > 0 &&
+        mcu > 0 &&
+        mcu % state.restart_interval == 0 {
+        reader.restart()
+        let mut r = 0
+        while r < order.length() {
+          state.components[order[r]].dc = 0
+          r = r + 1
         }
-        block_y = block_y + 1
       }
-      s = s + 1
+      let mcu_x = mcu % mcus_x
+      let mcu_y = mcu / mcus_x
+      let mut k = 0
+      while k < order.length() {
+        let comp = state.components[order[k]]
+        let mut block_y = 0
+        while block_y < comp.v {
+          let mut block_x = 0
+          while block_x < comp.h {
+            decode_block(
+              state,
+              reader,
+              comp,
+              (mcu_x * comp.h + block_x) * 8,
+              (mcu_y * comp.v + block_y) * 8,
+            )
+            block_x = block_x + 1
+          }
+          block_y = block_y + 1
+        }
+        k = k + 1
+      }
+      mcu = mcu + 1
     }
-    mcu = mcu + 1
+  }
+  let mut t = 0
+  while t < order.length() {
+    state.components[order[t]].scanned = true
+    t = t + 1
   }
   state.pos = reader.pos
 }
@@ -462,18 +544,21 @@ fn decode_scan(
 /// Decode a baseline JPEG datastream into an `Image`.
 ///
 /// The marker segments are read in order: the quantisation tables, the frame
-/// header, the Huffman tables, and the restart interval. The single sequential
-/// scan is then entropy-decoded block by block, dequantised, inverse
-/// transformed, resampled to the full resolution, and converted from YCbCr (or
-/// passed through when the frame is already RGB). Modes outside baseline
-/// sequential, such as progressive or arithmetic coding, are rejected.
+/// header, the Huffman tables, the restart interval, and the Adobe colour
+/// transform. Every sequential scan is entropy-decoded into per-component
+/// planes; once the scans have covered the frame, the planes are resampled to
+/// full resolution and converted to RGB, grayscale, or gray plus alpha.
+/// Baseline permits one to four components and any split of the blocks into
+/// scans, so all of those forms are accepted. Modes outside baseline
+/// sequential, such as progressive, arithmetic-coded, or hierarchical frames,
+/// are rejected.
 pub fn decode(data : Bytes) -> @image.Image raise JpegDecodeError {
   if !is_jpeg(data) {
     raise NotJpeg
   }
   let state = JpegState::new(data)
   state.pos = 2
-  let mut image : @image.Image? = None
+  let mut scans = 0
   while true {
     let marker = next_marker(state)
     if marker < 0 {
@@ -497,17 +582,45 @@ pub fn decode(data : Bytes) -> @image.Image raise JpegDecodeError {
         raise BadData(reason="the DRI segment is truncated")
       }
       state.restart_interval = be16(payload, 0)
+    } else if marker == 0xEE {
+      parse_app14(state, payload)
     } else if marker == 0xDA {
       decode_scan(state, payload)
-      image = Some(render_image(state))
+      scans = scans + 1
     } else if marker >= 0xC0 && marker <= 0xCF {
       raise BadData(
         reason="the frame type 0x\{marker} is not baseline sequential",
       )
     }
   }
-  match image {
-    Some(value) => value
-    None => raise BadData(reason="the datastream carries no scan")
+  if !state.frame_seen {
+    raise BadData(reason="the datastream carries no frame header")
+  }
+  if scans == 0 {
+    raise BadData(reason="the datastream carries no scan")
+  }
+  let mut i = 0
+  while i < state.components.length() {
+    if !state.components[i].scanned {
+      raise BadData(
+        reason="the scans leave component \{state.components[i].id} undecoded",
+      )
+    }
+    i = i + 1
+  }
+  render_image(state)
+}
+
+///|
+/// Read APP14. Adobe writes its colour transform in the last of the twelve
+/// payload bytes: 0 for CMYK, 2 for YCCK.
+fn parse_app14(state : JpegState, payload : Bytes) -> Unit {
+  if payload.length() >= 12 &&
+    payload[0] == b'A' &&
+    payload[1] == b'd' &&
+    payload[2] == b'o' &&
+    payload[3] == b'b' &&
+    payload[4] == b'e' {
+    state.adobe_transform = payload[11].to_int()
   }
 }

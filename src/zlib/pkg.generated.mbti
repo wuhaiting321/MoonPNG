@@ -6,9 +6,9 @@ import {
 }
 
 // Values
-pub fn adler32(Bytes) -> UInt
+pub fn adler32(Bytes) -> UInt32
 
-pub fn crc32(Bytes) -> UInt
+pub fn crc32(Bytes) -> UInt32
 
 pub fn inflate_zlib(Bytes) -> Bytes raise InflateError
 
