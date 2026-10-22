@@ -21,9 +21,9 @@
 | 项目方向 | 图像编解码基础库 / PNG 与 JPEG |
 | 是否为移植项目 | 否，原创项目 |
 | 模块名 | `wuhaiting321/moonpng`（遵循 mooncakes.io 的 `<author>/<module>` 命名规范） |
-| 代码规模 | 2854 行库源码 + 1124 行测试 + 71 行可运行示例，24 个 `.mbt` 文件，合计 4049 行 |
-| 测试状态 | `moon test` 全部通过（45 个用例，0 失败）；行覆盖率 921 / 1040 |
-| 构建状态 | 默认目标与 `moon check --target all --deny-warn` 均零错误、零告警 |
+| 代码规模 | 3227 行库源码 + 1328 行测试 + 77 行可运行示例，25 个 `.mbt` 文件，合计 4632 行 |
+| 测试状态 | `moon test` 全部通过（50 个用例，0 失败）；行覆盖率 974 / 1111 |
+| 构建状态 | `moon check` 与 `moon check --target all` 均零错误；告警只随工具链版本变动，见 5.4 |
 | 开源许可证 | Apache-2.0 |
 
 ## 二、项目简介
@@ -107,14 +107,29 @@ gray samples: first=255, last=255, mean=127
   均为大端序；逐行在 5 种滤波器中按残差代价择优，平局取更小编号。
 - **真正的压缩**：IDAT 使用 LZ77 滑动窗口 + 固定 Huffman，经 zlib 包裹
   （2 字节头 + Adler-32），而非 stored 块直出。
-- **Baseline JPEG 解码**：SOI / DQT / SOF0 / DHT / DRI / SOS / EOI 解析，
-  canonical Huffman、DC 差分 + AC 游程、符号扩展、重启间隔 RSTn、
-  zig-zag 反重排、反量化、可分离 IDCT、YCbCr→RGB 与最近邻色度上采样。
+- **完整的 Baseline JPEG 解码终点**：SOF0 顺序 DCT 帧的每一条合法路径——
+  分量数 1 到 4；分量可按任意合法方式划分为多个扫描（多分量交错扫描，
+  或单分量非交错扫描），每个扫描独立重置 DC 预测；DQT（8 / 16 位精度）、
+  canonical Huffman、DRI 与 RSTn 重启、zig-zag 反重排、反量化、
+  可分离 IDCT、非整 MCU 的边界补全、最近邻色度上采样。
+- **全部合法分量形态**：1 分量灰度；2 分量灰度 + Alpha（T.81 不为两分量
+  定义色彩变换）；3 分量 RGB（按 `R/G/B` 分量标识直通）或 YCbCr（JFIF 约定）；
+  4 分量 CMYK（APP14 transform 0）与 YCCK（transform 2），后两者按 Adobe
+  反相约定还原墨量后合成 RGB。
 - **明确的拒绝路径**：非 PNG/JPEG 输入、CRC 不符、数据截断、非法位深、
-  索引图缺调色板、渐进式 JPEG、算术编码、未定义的量化/Huffman 表，
-  一律抛出具名错误而不是返回半成品。
+  索引图缺调色板、渐进式 / 算术编码 / 12 位 / 无损 / 分层 JPEG、
+  未定义的量化或 Huffman 表，一律抛出具名错误而不是返回半成品。
 - **三端统一 API**：`@png.decode(Bytes) -> Image`、`@png.encode(Image) -> Bytes`、
   `@png_jpeg.decode(Bytes) -> Image`，Native / Wasm / WasmGC / JS 共享同一实现。
+
+**格式实现终点。** JPEG 侧的目标是 ITU T.81 的 Baseline sequential DCT
+（SOF0、8 位精度）这一整类，而不是它的某个子集：SOF0 帧允许的分量数
+（1–4）、采样因子（1–4 的任意组合）、扫描划分（一个交错扫描、若干按分量的
+非交错扫描，或两者的任意组合）、重启间隔与边界 MCU 补全，解码器全部接受；
+帧内所有分量扫描完成后才组装图像，缺任一分量即报错，因此"能解"对应的是
+格式允许的全部形态，而不是某条样例数据恰好走通的路径。SOF1（12 位）、
+SOF2（渐进）、SOF3（无损）、SOF5–7（分层）、SOF9–11（算术编码）
+不在该终点内，遇到时抛出带具体帧类型的 `BadData`，而不是静默降级。
 
 ## 五、安装方式与快速开始
 
@@ -153,16 +168,22 @@ moon run examples --target wasm   # 无需 gcc 或 Node.js，使用自带的 WAS
 ### 5.4 构建与验证
 
 ```bash
-moon check --deny-warn               # 默认目标，零告警
-moon check --target all --deny-warn  # Native / Wasm / WasmGC / JS
-moon test                            # 45 个用例
-moon test --enable-coverage
-moon coverage report -f summary      # 921 / 1040
+moon check                          # 默认目标，零错误
+moon check --target all             # Native / Wasm / WasmGC / JS
+moon test                           # 50 个用例
+moon test --target wasm --enable-coverage
+moon coverage report -f summary     # 974 / 1111
 ```
 
 仓库是**库**，`examples/` 只是演示三个入口的主包，不提供通用命令行工具；
 验证方式是类型检查、测试套件与示例本身，测试语料（PngSuite 片段、
-Pillow 生成的 JPEG）已内嵌在 `test/` 与 `examples/` 中，离线可跑。
+Pillow 生成的 JPEG、按 T.81 手工构造的多扫描流）已内嵌在 `test/` 与
+`examples/` 中，离线可跑。
+
+> 关于告警：MoonBit 官方滚动发布 `latest` 通道，新版本会给既有
+> `derive(Eq, Debug)` 增加 `implicit_impl_as_method` 之类的弃用提示。
+> 本项目只保证零错误；CI 因此在所有目标上跑类型检查与全量测试，
+> 而不把 `--deny-warn` 设为门禁，避免工具链升级把构建染红。
 
 ### 5.5 作为依赖安装
 
@@ -198,17 +219,17 @@ fn load_photo(bytes : Bytes) -> @image.Image raise {
 
 | 包 | 职责 | 源码规模 |
 | --- | --- | --- |
-| `src/image` | `ColorType`、`Image` 与派生几何（通道数、行字节数、样本总数） | 146 行 |
-| `src/io_abstraction` | `Reader` / `Writer` trait 与内存后端，集中处理字节序与越界 | 208 行 |
-| `src/zlib` | Adler-32、CRC-32 与完整 DEFLATE 解码器 | 435 行 |
-| `src/png_decode` | chunk 解析、CRC 校验、inflate、反滤波、Adam7 反交错 | 572 行 |
-| `src/png_encode` | chunk 组帧、滤波择优、LZ77 + 固定 Huffman 编码（含白盒测试） | 615 行 |
-| `src/png` | 门面：`decode` / `encode` / `version` | 24 行 |
-| `src/png_jpeg` | marker 解析、Huffman、反量化、IDCT、色彩还原 | 854 行 |
+| `src/image` | `ColorType`、`Image` 与派生几何（通道数、行字节数、样本总数） | 162 行 |
+| `src/io_abstraction` | `Reader` / `Writer` trait 与内存后端，集中处理字节序与越界 | 240 行 |
+| `src/zlib` | Adler-32、CRC-32 与完整 DEFLATE 解码器 | 460 行 |
+| `src/png_decode` | chunk 解析、CRC 校验、inflate、反滤波、Adam7 反交错 | 598 行 |
+| `src/png_encode` | chunk 组帧、滤波择优、LZ77 + 固定 Huffman 编码（含白盒测试） | 657 行 |
+| `src/png` | 门面：`decode` / `encode` / `version` | 28 行 |
+| `src/png_jpeg` | marker 解析、多扫描累加、Huffman、反量化、IDCT、色彩还原 | 1082 行 |
 
 依赖方向单向：`png → png_decode / png_encode → { image, io_abstraction, zlib }`，
-`png_jpeg → image`，底层三包互不依赖，不存在环。上表合计 2854 行，另有 1124 行
-测试代码与 71 行可运行示例（`examples/`，独立主包），总计 4049 行，
+`png_jpeg → image`，底层三包互不依赖，不存在环。上表合计 3227 行，另有 1328 行
+测试代码与 77 行可运行示例（`examples/`，独立主包），总计 4632 行，
 低于 5000 行的项目硬约束。
 
 ### 6.2 核心技术实现
@@ -236,14 +257,18 @@ fn load_photo(bytes : Bytes) -> @image.Image raise {
    至少 3 字节的重复串，命中则发 length/distance 对，否则发 literal，
    码流统一用固定 Huffman，最后加 zlib 头与 Adler-32。相比 stored 块直出，
    这一层让 IDAT 真正变小，而不只是"格式正确"。
-5. **Baseline JPEG 解码器（`png_jpeg`）。** marker 走查只认 SOF0 帧与单次
-   顺序扫描，把采样因子、量化表与 Huffman 表读进状态；熵解码的位读取器
-   按 MSB-first 组装码字，遇到 `FF 00` 视为填充并跳过，遇到真 marker 就停在
-   原地交给上层。每个块先解 DC 差分（预测器按分量保存、按重启间隔清零），
-   再按 run/size 解 AC 游程；系数经 zig-zag 反重排与反量化后做可分离 IDCT。
-   基函数以常量表硬编码（`C(u)cos((2x+1)uπ/16)/2`），不调用平台 `cos`，
-   保证四个后端逐位一致。最后按 `max_h / h`、`max_v / v` 做最近邻上采样，
-   按 JFIF 权重还原 YCbCr，或识别 `R/G/B` 分量标识直接直通。
+5. **Baseline JPEG 解码器（`png_jpeg`）。** marker 走查读入 SOF0 的几何、
+   每个分量的采样因子与量化表，随即按 MCU 网格为全部分量分配样本平面；
+   平面跨扫描保留，因此一个顺序帧可以把块分进任意多个扫描。每个 SOS 只解码
+   它列出的分量：`Ns > 1` 按交错 MCU 走 `h × v` 个块，`Ns == 1` 按该分量
+   自身块网格的光栅顺序走；每个扫描开始时，把该扫描涉及分量的 DC 预测器归零，
+   重启间隔到达时再归零一次。熵解码的位读取器按 MSB-first 组装码字，遇到
+   `FF 00` 视为填充并跳过，遇到真 marker 就停在原地交给上层；每个块先解
+   DC 差分，再按 run/size 解 AC 游程；系数经 zig-zag 反重排与反量化后做
+   可分离 IDCT，基函数以常量表硬编码（`C(u)cos((2x+1)uπ/16)/2`），
+   不调用平台 `cos`，保证四个后端逐位一致。所有分量扫描完成后一次性组装：
+   按 `max_h / h`、`max_v / v` 最近邻上采样，再按分量数选择灰度、
+   灰度 + Alpha、RGB / YCbCr，或依 APP14 的 transform 走 CMYK / YCCK。
 6. **错误模型。** 每个包导出自己的 suberror：`PngDecodeError`（签名、chunk、
    CRC、截断）、`InflateError`、`PngEncodeError`（非法位深、长度不符、缺调色板）、
    `JpegDecodeError`（`NotJpeg` 与带原因的 `BadData`）。错误信息带具体原因
@@ -272,8 +297,10 @@ Image ─► 参数校验 ─► 逐行滤波择优 ─► LZ77 + 固定 Huffman
 
 ```
 JPEG 解码
-Bytes ─► SOI ─► DQT / SOF0 / DHT / DRI ─► SOS ─► MCU 扫描（Huffman + 游程）
-      ─► 反量化 ─► 可分离 IDCT ─► 色度上采样 ─► YCbCr→RGB ─► Image
+Bytes ─► SOI ─► DQT / SOF0（1–4 分量）/ DHT / DRI / APP14 ─► 分配分量平面
+      ─► SOS × N（交错或单分量扫描，Huffman + 游程 + RSTn）
+      ─► 反量化 ─► 可分离 IDCT ─► 写回对应分量平面
+      ─► 全部分量到齐 ─► 上采样 ─► YCbCr / CMYK / YCCK / RGB 直通 ─► Image
 ```
 
 ### 6.4 验证与质量保障
@@ -281,28 +308,42 @@ Bytes ─► SOI ─► DQT / SOF0 / DHT / DRI ─► SOS ─► MCU 扫描（Hu
 - **CI 门禁**：GitHub Actions 在 Linux / macOS / Windows 上并行执行
   `moon check`、`moon check --target all`、`moon test`，并在 native 目标上
   输出覆盖率摘要。
-- **测试规模**：45 个用例，覆盖 IO 往返与越界、图像几何、色彩类型编码往返、
+- **测试规模**：50 个用例，覆盖 IO 往返与越界、图像几何、色彩类型编码往返、
   CRC-32 / Adler-32 标准向量、PngSuite 语料解码、Adam7 反交错、编码器往返与
-  全部拒绝路径、JPEG marker / Huffman / IDCT / 重启 / 错误路径。
+  全部拒绝路径，以及 JPEG 的 marker / Huffman / IDCT / 重启 / 多扫描 /
+  1–4 分量 / CMYK 与 YCCK / 错误路径。
 - **覆盖率**：`moon test --enable-coverage` + `moon coverage report -f summary`
-  为 921 / 1040。
+  为 974 / 1111。
 - **示例实跑**：`moon run examples --target wasm` 在 WASI 运行时上真实执行，
   一次跑通解码、编码往返与 JPEG 解码，输出见第三节。
 - **外部参照**：PngSuite `basn*` 语料的样本流 CRC-32 取自独立的 CPython
   预言机，而不是本项目自身的实现，避免"自己验证自己"。
 - **PNG 互操作**：本编码器产出的数据流经 Python Pillow 11.1.0 解码，
   gray1 / gray8 / gray16 / rgb8 / rgba8 / rgba16 / ga8 共 7 条语料逐样本一致。
-- **JPEG 互操作**：Pillow 生成的 6 条语料由本解码器还原，与 Pillow 的 RGB 输出
-  对比（容差体现 IDCT 末位与色度插值方式差异）：
+- **JPEG 互操作**：Pillow 生成的语料由本解码器还原，与 Pillow 的 RGB 输出
+  对比（容差体现 IDCT 末位与色度插值方式差异）；扫描划分与分量形态的语料
+  则按 T.81 手工构造，期望值由"量化步长全 1、每块只有 DC 系数"直接推出
+  （样本 = 128 + DC / 8），不依赖任何解码器：
 
   | 语料 | 场景 | 最大通道误差 |
   | --- | --- | --- |
   | gray8 | 灰度 8×8 | 0 |
-  | rgb444 | 4:4:4 | 2 |
-  | rgb422 | 4:2:2 | 7 |
-  | rgb420 | 4:2:0 | 13 |
+  | rgb444 | 4:4:4 单扫描 | 2 |
+  | rgb422 | 4:2:2 单扫描 | 7 |
+  | rgb420 | 4:2:0 单扫描 | 13 |
   | rgb420rst | 4:2:0 + 每个 MCU 重启 | 13，且像素与不重启版本完全一致 |
   | rgb420odd | 4:2:0，13×9 非整 MCU | 13 |
+  | cmyk4 | 4 分量 CMYK 单扫描（Pillow 编码） | 0 |
+  | multiscan | 3 分量拆成三个扫描（Y / Cb / Cr 各一） | 0 |
+  | cmyk2scan | 4 分量拆成两个扫描（CMY 交错 + K 单扫） | 0 |
+  | ga2 | 2 分量（灰度 + Alpha）两个扫描 | 0 |
+
+  其中 `multiscan` 另由 Pillow 独立解码核对过像素位置（左 8 列 128、右 8 列 200，
+  与期望值逐像素一致）；`cmyk2scan` 与 `ga2` 没有这样的外部参照——Pillow 会直接
+  拒绝两分量帧，对合成的四分量帧则套用它自身的 YCCK 路径，因此这两条以 T.81
+  解析推出的样本值断言，而不是拿一个解释路径不同的解码器当真值。`cmyk4` 反过来
+  验证了 Adobe CMYK 的反相墨量约定：样本 235 / 215 / 195 / 245 对应墨量
+  20 / 40 / 60 / 10，还原出的 RGB 与 Pillow 逐通道一致。
 
 ### 6.5 移植或参考说明
 
@@ -328,8 +369,9 @@ Bytes ─► SOI ─► DQT / SOF0 / DHT / DRI ─► SOS ─► MCU 扫描（Hu
   调用方，库本身只处理 `Bytes`。
 - **编码器只写渐进式 PNG**：不生成 Adam7 隔行图，也不做调色板量化，
   以此把编码路径压缩到可审计的规模。
-- **JPEG 只解不编**：仅接受 8 位 Baseline sequential 的 1 / 3 分量帧；
-  渐进式、算术编码、12 位精度、CMYK 与 EXIF / ICC 均显式拒绝。
+- **JPEG 只解不编**：接受 8 位 Baseline sequential（SOF0）的全部合法形态，
+  即 1–4 分量与任意合法扫描划分；把渐进式、无损、分层、算术编码与 12 位精度
+  排除在外，EXIF / ICC 等辅助段跳过而不参与解码。
 - **色度上采样用最近邻**：实现最省且三端结果一致，代价是与插值型解码器在色度
   边缘存在若干级差异，这一差异已在测试中以容差显式记录，而不是假装不存在。
 - **IDCT 使用硬编码浮点基函数**：不调用平台 `cos`，避免各后端最后一位不一致。
@@ -346,6 +388,7 @@ Bytes ─► SOI ─► DQT / SOF0 / DHT / DRI ─► SOS ─► MCU 扫描（Hu
 - [x] PNG 编码器（chunk 组帧、滤波择优、LZ77 + Huffman、zlib 包裹）
 - [x] 面向 PngSuite 语料与 Pillow 的交叉验证
 - [x] Baseline JPEG 解码器（marker / Huffman / IDCT / 重启 / 色彩还原）
+- [x] Baseline JPEG 全形态（1–4 分量、交错与非交错多扫描、CMYK / YCCK）
 - [x] 可运行示例与三个典型使用场景
 - [ ] 在剩余行数预算内补充更精细的色度插值
 
